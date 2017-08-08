@@ -3,6 +3,6 @@
 
 mkdir -p build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX=../bin/Release -DEIGEN_INCLUDE_DIR=/home/lee8rx/anaconda/envs/pyir/include/eigen3 ..
+cmake -DCMAKE_INSTALL_PREFIX=.. -DEIGEN_INCLUDE_DIR=/home/lee8rx/anaconda/envs/pyir/include/eigen3 ..
 make -j4
 make install
