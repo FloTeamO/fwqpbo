@@ -122,7 +122,7 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
     if dPar.frameList:
         imType = getType(dPar.frameList)
     for z, slice in enumerate(dPar.sliceList):
-        filename = outDir+r'/{}.dcm'.format(slice)
+        filename = os.path.join(outDir, '{}.dcm'.format(slice))
         # Prepare pixel data; truncate and scale
         if 'cropFOV' in dPar:
             img = np.zeros((dPar.Ny, dPar.Nx))
@@ -372,7 +372,7 @@ def getType(frameList, printType=False):
     if numM+numP == 0 and numR+numI > 0 and numR == numI:
         if printType:
             print('Real/Imaginary images')
-        return 'RI'
+        return 'IR'
     elif numM+numP > 0 and numR+numI == 0 and numM == numP:
         if printType:
             print('Magnitude/Phase images')
@@ -380,7 +380,12 @@ def getType(frameList, printType=False):
     elif numP == 0 and numM+numR+numI > 0 and numM == numR == numI:
         if printType:
             print('Magnitude/Real/Imaginary images')
-        return 'MRI'
+        return 'IMR'
+    elif ((numP > 0 and numM > 0 and numR > 0 and numI > 0) and
+          (numP == numM == numR == numI)):
+        if printType:
+            print('Magnitude/Real/Imaginary images')
+        return 'IMPR'
     else:
         raise Exception('Unknown combination of image types: ' +
                         '{} real, {} imag, {} magn, {} phase'
@@ -460,10 +465,45 @@ def updateDataParamsDICOM(dPar, files):
                         frameList[magnFrame][1]][y1:y2, x1:x2].flatten()
                     phase = dcm.pixel_array[
                         frameList[phaseFrame][1]][y1:y2, x1:x2].flatten()
-                    # Abs val needed for Siemens data to get correct phase sign
-                    reScaleIntercept = \
-                        np.abs(getAttribute(dcm, 'Rescale Intercept',
-                                            frameList[phaseFrame][1]))
+                    if dcm.Manufacturer.startswith('Philips'):
+                        magn_slope = \
+                            getAttribute(dcm, 'Rescale Slope',
+                                         frameList[magnFrame][1])
+                        phase_slope = \
+                            getAttribute(dcm, 'Rescale Slope',
+                                         frameList[phaseFrame][1])
+                        magn_intercept = \
+                            getAttribute(dcm, 'Rescale Intercept',
+                                         frameList[magnFrame][1])
+                        phase_intercept = \
+                            getAttribute(dcm, 'Rescale Intercept',
+                                         frameList[phaseFrame][1])
+                        try:
+                            phase_rescale = \
+                                getAttribute(dcm, 'Rescale Type',
+                                             frameList[phaseFrame][1])
+                        except AttributeError:
+                            phase_rescale = 'mrad'
+                            warnings.warn("assuming Rescale Type is mrad")
+                        print('phase_rescale = {}'.format(phase_rescale))
+                        c = magn * magn_slope + magn_intercept
+                        if phase_rescale == 'mrad':
+                            pscale = 0.001
+                        else:
+                            raise RuntimeError(
+                                "Unknown RescaleType: {}".format(
+                                    phase_rescale))
+                        c = c * np.exp(1j*pscale * (
+                            phase * phase_slope + phase_intercept))
+                    elif dcm.Manufacturer.startswith('Siemens'):
+                        # Abs val needed for Siemens data to get correct phase sign
+                        reScaleIntercept = \
+                            np.abs(getAttribute(dcm, 'Rescale Intercept',
+                                                frameList[phaseFrame][1]))
+                    else:
+                        raise NotImplementedError(
+                            "Unimplemented for manufacturer: {}".format(
+                                dcm.Manufacturer))
                 else:
                     magnFile = frameList[magnFrame][0]
                     phaseFile = frameList[phaseFrame][0]
@@ -471,17 +511,45 @@ def updateDataParamsDICOM(dPar, files):
                     pDcm = dicom.read_file(phaseFile)
                     magn = mDcm.pixel_array[y1:y2, x1:x2].flatten()
                     phase = pDcm.pixel_array[y1:y2, x1:x2].flatten()
-                    # Abs val needed for Siemens data to get correct phase sign
-                    reScaleIntercept = np.abs(
-                        getAttribute(pDcm, 'Rescale Intercept'))
+                    if mDcm.Manufacturer.startswith('Philips'):
+                        magn_slope = mDcm.RescaleSlope
+                        phase_slope = pDcm.RescaleSlope
+                        magn_intercept = mDcm.RescaleIntercept
+                        phase_intercept = pDcm.RescaleIntercept
+                        c = magn * magn_slope + magn_intercept
+                        try:
+                            if pDcm.RescaleType == 'mrad':
+                                pscale = 0.001
+                            else:
+                                raise RuntimeError(
+                                    "Unknown RescaleType: {}".format(
+                                        pDcm.RescaleType))
+                        except AttributeError:
+                            pscale = 0.001
+                            warnings.warn("No RescaleType tag found.  "
+                                          "Assuming 'mrad'")
+                        c = c * np.exp(1j*pscale * (
+                            phase * phase_slope + phase_intercept))
+                    elif mDcm.Manufacturer.startswith('Siemens'):
+                        # Abs val needed for Siemens data to get correct phase sign
+                        reScaleIntercept = np.abs(
+                            getAttribute(pDcm, 'Rescale Intercept'))
+                        c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
+                    else:
+                        raise NotImplementedError(
+                            "Unimplemented for manufacturer: {}".format(
+                                dcm.Manufacturer))
                 # For some reason, intercept is used as slope (Siemens only?)
-                c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
+
+
             # Real/imaginary images and Magnitude/real/imaginary images
-            elif dcm_types == 'RI' or dcm_types == 'MRI':
-                if dcm_types == 'RI':
+            elif dcm_types == 'IR' or dcm_types == 'IMR' or dcm_types == 'IMPR':
+                if dcm_types == 'IR':
                     realFrame = i+1
-                elif dcm_types == 'MRI':
+                elif dcm_types == 'IMR':
                     realFrame = i+2
+                elif dcm_types == 'IMPR':
+                    realFrame = i+3
                 imagFrame = i
                 if multiframe:
                     realPart = dcm.pixel_array[
