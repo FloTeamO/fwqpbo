@@ -836,7 +836,7 @@ def updateAlgoParams(aPar, N):
     else:
         aPar.R2step = 1.0  # [sec-1]
     aPar.iR2cand = np.array(list(set([min(aPar.nR2-1, int(R2/aPar.R2step))
-                            for R2 in aPar.R2cand])))  # [msec]
+                            for R2 in aPar.R2cand])), dtype=np.int32)  # [msec]
     aPar.nR2cand = len(aPar.iR2cand)
     aPar.maxICMupdate = round(aPar.nB0/10)
 
