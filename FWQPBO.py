@@ -1,6 +1,10 @@
+import warnings
 import numpy as np
 import os
-import dicom
+try:
+    import dicom
+except ImportError:
+    import pydicom as dicom
 import datetime
 import sys
 import configparser
@@ -50,13 +54,15 @@ tagDict = {
 def getSOPInstanceUID():
     t = datetime.datetime.now()
     datestr = '{:04d}{:02d}{:02d}{:02d}{:02d}{:02d}{:03d}'.format(
-     t.year, t.month, t.day, t.hour, t.minute, t.second, t.microsecond//1000)
+        t.year, t.month, t.day, t.hour, t.minute, t.second,
+        t.microsecond//1000)
     randstr = str(np.random.randint(1000, 1000000000))
     uidstr = "1.3.12.2.1107.5.2.32.35356." + datestr + randstr
     return uidstr
 
 
-def getSeriesInstanceUID(): return getSOPInstanceUID() + ".0.0.0"
+def getSeriesInstanceUID():
+    return getSOPInstanceUID() + ".0.0.0"
 
 
 # Set window so that 95% of pixels are inside
@@ -116,7 +122,7 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
     if dPar.frameList:
         imType = getType(dPar.frameList)
     for z, slice in enumerate(dPar.sliceList):
-        filename = outDir+r'/{}.dcm'.format(slice)
+        filename = os.path.join(outDir, '{}.dcm'.format(slice))
         # Prepare pixel data; truncate and scale
         if 'cropFOV' in dPar:
             img = np.zeros((dPar.Ny, dPar.Nx))
@@ -130,7 +136,7 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
         im = im.astype('uint16')
         # Set window so that 95% of pixels are inside
         windowCenter, windowWidth = get95percentileWindow(
-                                            im, reScaleIntercept, reScaleSlope)
+            im, reScaleIntercept, reScaleSlope)
         if dPar.frameList:
             # Get frame
             frame = dPar.frameList[dPar.totalN*slice*len(imType)]
@@ -185,8 +191,12 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
             imVol[z] = im
             frames.append(iFrame)
         else:
-            ds.PixelData = im
-            ds.save_as(filename)
+            try:
+                ds.PixelData = im
+                ds.save_as(filename)
+            except KeyError:
+                print("KeyError: Error.  saving as numpy array instead")
+                np.save(filename.replace('.dcm', '.npy'), im)
 
     if multiframe:
         setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID())
@@ -194,9 +204,13 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
         ds[tagDict['Frame sequence']].value = \
             [ds[tagDict['Frame sequence']].value[frame] for frame in frames]
         ds.PixelData = imVol
-        filename = outDir+r'/0.dcm'
-        ds.save_as(filename)
-
+        try:
+            filename = os.path.join(outDir, '0.dcm')
+            print("filename = {}".format(filename))
+            ds.save_as(filename)
+        except PermissionError:
+            print("Permission Error.  saving as numpy array instead")
+            np.save(filename.replace('.dcm', '.npy'), imVol)
 
 # Check if ds is a multiframe DICOM object
 def isMultiFrame(ds):
@@ -274,8 +288,8 @@ def AttrInDataset(ds, attr, multiframe):
 
 # List of DICOM attributes required for the water-fat separation
 reqAttributes = ['Image Type', 'Echo Time', 'Slice Location',
-                               'Imaging Frequency', 'Columns', 'Rows',
-                               'Pixel Spacing', 'Spacing Between Slices']
+                 'Imaging Frequency', 'Columns', 'Rows',
+                 'Pixel Spacing', 'Spacing Between Slices']
 
 
 # Checks if list of DICOM files contains required information
@@ -366,7 +380,7 @@ def getType(frameList, printType=False):
     if numM+numP == 0 and numR+numI > 0 and numR == numI:
         if printType:
             print('Real/Imaginary images')
-        return 'RI'
+        return 'IR'
     elif numM+numP > 0 and numR+numI == 0 and numM == numP:
         if printType:
             print('Magnitude/Phase images')
@@ -374,7 +388,12 @@ def getType(frameList, printType=False):
     elif numP == 0 and numM+numR+numI > 0 and numM == numR == numI:
         if printType:
             print('Magnitude/Real/Imaginary images')
-        return 'MRI'
+        return 'IMR'
+    elif ((numP > 0 and numM > 0 and numR > 0 and numI > 0) and
+          (numP == numM == numR == numI)):
+        if printType:
+            print('Magnitude/Real/Imaginary images')
+        return 'IMPR'
     else:
         raise Exception('Unknown combination of image types: ' +
                         '{} real, {} imag, {} magn, {} phase'
@@ -382,7 +401,7 @@ def getType(frameList, printType=False):
 
 
 # update dPar with info retrieved from the DICOM files including image data
-def updateDataParamsDICOM(dPar, files):
+def updateDataParamsDICOM(dPar, files, verbose=False):
     frameList = []
     for file in files:
         ds = dicom.read_file(file, stop_before_pixels=True)
@@ -401,7 +420,7 @@ def updateDataParamsDICOM(dPar, files):
     frameList.sort(key=lambda tags: tags[3])  # Second, sort on echo time
     frameList.sort(key=lambda tags: tags[4])  # Third, sort on slice location
 
-    type = getType(frameList, True)
+    dcm_types = getType(frameList, True)
     dPar.dx = float(frameList[0][8][1])
     dPar.dy = float(frameList[0][8][0])
     dPar.dz = float(frameList[0][9])
@@ -445,8 +464,8 @@ def updateDataParamsDICOM(dPar, files):
         dcm = dicom.read_file(file)
     for n in dPar.echoes:
         for slice in dPar.sliceList:
-            i = (dPar.N*slice+n)*len(type)
-            if type == 'MP':  # Magnitude/phase images
+            i = (dPar.N*slice+n)*len(dcm_types)
+            if dcm_types == 'MP':  # Magnitude/phase images
                 magnFrame = i
                 phaseFrame = i+1
                 if multiframe:
@@ -454,10 +473,45 @@ def updateDataParamsDICOM(dPar, files):
                         frameList[magnFrame][1]][y1:y2, x1:x2].flatten()
                     phase = dcm.pixel_array[
                         frameList[phaseFrame][1]][y1:y2, x1:x2].flatten()
-                    # Abs val needed for Siemens data to get correct phase sign
-                    reScaleIntercept = \
-                        np.abs(getAttribute(dcm, 'Rescale Intercept',
-                                            frameList[phaseFrame][1]))
+                    if dcm.Manufacturer.startswith('Philips'):
+                        magn_slope = \
+                            getAttribute(dcm, 'Rescale Slope',
+                                         frameList[magnFrame][1])
+                        phase_slope = \
+                            getAttribute(dcm, 'Rescale Slope',
+                                         frameList[phaseFrame][1])
+                        magn_intercept = \
+                            getAttribute(dcm, 'Rescale Intercept',
+                                         frameList[magnFrame][1])
+                        phase_intercept = \
+                            getAttribute(dcm, 'Rescale Intercept',
+                                         frameList[phaseFrame][1])
+                        try:
+                            phase_rescale = \
+                                getAttribute(dcm, 'Rescale Type',
+                                             frameList[phaseFrame][1])
+                        except AttributeError:
+                            phase_rescale = 'mrad'
+                            warnings.warn("assuming Rescale Type is mrad")
+                        print('phase_rescale = {}'.format(phase_rescale))
+                        c = magn * magn_slope + magn_intercept
+                        if phase_rescale == 'mrad':
+                            pscale = 0.001
+                        else:
+                            raise RuntimeError(
+                                "Unknown RescaleType: {}".format(
+                                    phase_rescale))
+                        c = c * np.exp(1j*pscale * (
+                            phase * phase_slope + phase_intercept))
+                    elif dcm.Manufacturer.startswith('Siemens'):
+                        # Abs val needed for Siemens data to get correct phase sign
+                        reScaleIntercept = \
+                            np.abs(getAttribute(dcm, 'Rescale Intercept',
+                                                frameList[phaseFrame][1]))
+                    else:
+                        raise NotImplementedError(
+                            "Unimplemented for manufacturer: {}".format(
+                                dcm.Manufacturer))
                 else:
                     magnFile = frameList[magnFrame][0]
                     phaseFile = frameList[phaseFrame][0]
@@ -465,17 +519,45 @@ def updateDataParamsDICOM(dPar, files):
                     pDcm = dicom.read_file(phaseFile)
                     magn = mDcm.pixel_array[y1:y2, x1:x2].flatten()
                     phase = pDcm.pixel_array[y1:y2, x1:x2].flatten()
-                    # Abs val needed for Siemens data to get correct phase sign
-                    reScaleIntercept = np.abs(
-                        getAttribute(pDcm, 'Rescale Intercept'))
+                    if mDcm.Manufacturer.startswith('Philips'):
+                        magn_slope = mDcm.RescaleSlope
+                        phase_slope = pDcm.RescaleSlope
+                        magn_intercept = mDcm.RescaleIntercept
+                        phase_intercept = pDcm.RescaleIntercept
+                        c = magn * magn_slope + magn_intercept
+                        try:
+                            if pDcm.RescaleType == 'mrad':
+                                pscale = 0.001
+                            else:
+                                raise RuntimeError(
+                                    "Unknown RescaleType: {}".format(
+                                        pDcm.RescaleType))
+                        except AttributeError:
+                            pscale = 0.001
+                            warnings.warn("No RescaleType tag found.  "
+                                          "Assuming 'mrad'")
+                        c = c * np.exp(1j*pscale * (
+                            phase * phase_slope + phase_intercept))
+                    elif mDcm.Manufacturer.startswith('Siemens'):
+                        # Abs val needed for Siemens data to get correct phase sign
+                        reScaleIntercept = np.abs(
+                            getAttribute(pDcm, 'Rescale Intercept'))
+                        c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
+                    else:
+                        raise NotImplementedError(
+                            "Unimplemented for manufacturer: {}".format(
+                                dcm.Manufacturer))
                 # For some reason, intercept is used as slope (Siemens only?)
-                c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
+
+
             # Real/imaginary images and Magnitude/real/imaginary images
-            elif type == 'RI' or type == 'MRI':
-                if type == 'RI':
+            elif dcm_types == 'IR' or dcm_types == 'IMR' or dcm_types == 'IMPR':
+                if dcm_types == 'IR':
                     realFrame = i+1
-                elif type == 'MRI':
+                elif dcm_types == 'IMR':
                     realFrame = i+2
+                elif dcm_types == 'IMPR':
+                    realFrame = i+3
                 imagFrame = i
                 if multiframe:
                     realPart = dcm.pixel_array[
@@ -506,30 +588,57 @@ def updateDataParamsDICOM(dPar, files):
                 raise Exception('Unknown image types')
             img.append(c)
     dPar.frameList = frameList
+	if verbose:
+	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
+	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = np.array(img)*dPar.reScale
+	if verbose:
+	    print("Min, max, mean img value (post) = {}, {}, {}".format(
+	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+	        np.mean(np.abs(dPar.img))))
 
+
+def updateDataParamsNPZ(dPar, file, verbose=False):
+	updateDataParamsNonDicom(dPar, file, npz=True, verbose=verbose)
+
+def updateDataParamsNPZ(dPar, file, verbose=False):
+	updateDataParamsNonDicom(dPar, file, npz=False, verbose=verbose)
 
 # update dPar with information retrieved from MATLAB file arranged
 # according to ISMRM fat-water toolbox
-def updateDataParamsMATLAB(dPar, file):
-    try:
-        mat = scipy.io.loadmat(file)
-    except:
-        raise Exception('Could not read MATLAB file {}'.format(file))
-    data = mat['imDataParams'][0, 0]
+def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
+    if npz:
+        data = np.load(file)
+        img = data['img']  # shape (nx, ny, ny, ncoils, nechoes)
+        echoTimes = data['echoTimes']  # in seconds
+        clockwise = bool(data['clockwise'])  # boolean
+        dPar.B0 = float(data['B0'])  # float
+        try:
+            dx = float(data['dx'])  # in mm
+            dy = float(data['dy'])  # in mm
+            dz = float(data['dz'])  # in mm
+        except KeyError:
+            # assume voxel size if not provided
+            dx = dy = 1.5
+            dz = 5
+        # mask = data['mask']
+    else:
+        try:
+            mat = scipy.io.loadmat(file)
+        except:
+            raise Exception('Could not read MATLAB file {}'.format(file))
+        data = mat['imDataParams'][0, 0]
 
-    for i in range(0, 4):
-        if len(data[i].shape) == 5:
-            img = data[i]  # Image data (row,col,slice,coil,echo)
-        elif data[i].shape[1] > 2:
-            echoTimes = data[i][0]  # TEs [sec]
-        else:
-            if data[i][0, 0] > 1:
-                dPar.B0 = data[i][0, 0]  # Fieldstrength [T]
-            else:
-                clockwise = data[i][0, 0]  # Clockwiseprecession?
+        img = data['images']
+        echoTimes = data['TE'][0]
+        clockwise = bool(data['PrecessionIsClockwise'][0, 0])
+        dPar.B0 = data['FieldStrength'][0, 0]
+        dx, dy, dz = 1.5, 1.5, 5  # Ad hoc assumption on voxelsize
 
-    if clockwise != 1:
+    # if 'mask' in data.dtype.fields:
+    #     mask = data['mask']
+
+    if not clockwise:
         raise Exception('Warning: Not clockwise precession. ' +
                         'Need to write code to handle this case!')
 
@@ -564,12 +673,12 @@ def updateDataParamsMATLAB(dPar, file):
     dPar.t1 = echoTimes[0]
     dPar.dt = np.mean(np.diff(echoTimes))
     if np.max(np.diff(echoTimes))/dPar.dt > 1.05 or np.min(
-      np.diff(echoTimes))/dPar.dt < .95:
+            np.diff(echoTimes))/dPar.dt < .95:
         raise Exception('Warning: echo inter-spacing varies more than 5%')
 
     dPar.frameList = []
 
-    dPar.dx, dPar.dy, dPar.dz = 1.5, 1.5, 5  # Ad hoc assumption on voxelsize
+    dPar.dx, dPar.dy, dPar.dz = dx, dy, dz
 
     # To get data as: (echo,slice,row,col)
     img.shape = (dPar.ny, dPar.nx, dPar.nz, dPar.N)
@@ -577,8 +686,14 @@ def updateDataParamsMATLAB(dPar, file):
     img = np.swapaxes(img, 2, 3)
 
     img = img.flatten()
+	if verbose:
+	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
+	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = img*dPar.reScale
-
+	if verbose:
+	    print("Min, max, mean img value (post) = {}, {}, {}".format(
+	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+	        np.mean(np.abs(dPar.img))))
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
 def getFACalphas(CL=None, P2U=None, UD=None):
@@ -762,7 +877,7 @@ def updateAlgoParams(aPar, N):
     else:
         aPar.R2step = 1.0  # [sec-1]
     aPar.iR2cand = np.array(list(set([min(aPar.nR2-1, int(R2/aPar.R2step))
-                            for R2 in aPar.R2cand])))  # [msec]
+                            for R2 in aPar.R2cand])), dtype=np.int32)  # [msec]
     aPar.nR2cand = len(aPar.iR2cand)
     aPar.maxICMupdate = round(aPar.nB0/10)
 
@@ -799,11 +914,15 @@ def updateDataParams(dPar, outDir=None):
     else:
         dPar.offresCenter = 0.
     if 'files' in dPar:
+        dPar.files = dPar.files.replace('\\', os.path.sep)
         dPar.files = dPar.files.split(',')
+
         validFiles = getValidFiles(dPar['files'])
         if not validFiles:
             if len(dPar.files) == 1 and dPar.files[0][-4:] == '.mat':
                 updateDataParamsMATLAB(dPar, dPar.files[0])
+            elif len(dPar.files) == 1 and dPar.files[0][-4:] == '.npz':
+                updateDataParamsNPZ(dPar, dPar.files[0])
             else:
                 raise Exception('No valid files found')
     elif 'dirs' in dPar:
@@ -853,6 +972,7 @@ def getSlabs(sliceList, reconSlab):
             slices.append(slice)
     slabs.append((slices, pos))
     return slabs
+
 
 # Get total fat component (for Fatty Acid Composition; trivial otherwise)
 def getFat(rho, nVxl, alpha):
@@ -1019,11 +1139,11 @@ def FW(dataParamFile, algoParamFile, modelParamFile, outDir=None):
 def main():
     # Initiate command line parser
     p = optparse.OptionParser()
-    p.add_option('--dataParamFile', '-d', default='',  type="string",
+    p.add_option('--dataParamFile', '-d', default='', type="string",
                  help="Name of data parameter configuration text file")
-    p.add_option('--algoParamFile', '-a', default='',  type="string",
+    p.add_option('--algoParamFile', '-a', default='', type="string",
                  help="Name of algorithm parameter configuration text file")
-    p.add_option('--modelParamFile', '-m', default='',  type="string",
+    p.add_option('--modelParamFile', '-m', default='', type="string",
                  help="Name of model parameter configuration text file")
 
     # Parse command line
