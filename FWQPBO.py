@@ -588,21 +588,23 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                 raise Exception('Unknown image types')
             img.append(c)
     dPar.frameList = frameList
-	if verbose:
-	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
-	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
+    if verbose:
+        print("Min, max, mean img value (pre) = {}, {}, {}".format(
+            np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = np.array(img)*dPar.reScale
-	if verbose:
-	    print("Min, max, mean img value (post) = {}, {}, {}".format(
-	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
-	        np.mean(np.abs(dPar.img))))
+    if verbose:
+        print("Min, max, mean img value (post) = {}, {}, {}".format(
+            np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+            np.mean(np.abs(dPar.img))))
 
 
 def updateDataParamsNPZ(dPar, file, verbose=False):
-	updateDataParamsNonDicom(dPar, file, npz=True, verbose=verbose)
+    updateDataParamsNonDicom(dPar, file, npz=True, verbose=verbose)
 
-def updateDataParamsNPZ(dPar, file, verbose=False):
-	updateDataParamsNonDicom(dPar, file, npz=False, verbose=verbose)
+
+def updateDataParamsMATLAB(dPar, file, verbose=False):
+    updateDataParamsNonDicom(dPar, file, npz=False, verbose=verbose)
+
 
 # update dPar with information retrieved from MATLAB file arranged
 # according to ISMRM fat-water toolbox
@@ -686,14 +688,14 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
     img = np.swapaxes(img, 2, 3)
 
     img = img.flatten()
-	if verbose:
-	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
-	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
+    if verbose:
+        print("Min, max, mean img value (pre) = {}, {}, {}".format(
+            np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = img*dPar.reScale
-	if verbose:
-	    print("Min, max, mean img value (post) = {}, {}, {}".format(
-	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
-	        np.mean(np.abs(dPar.img))))
+    if verbose:
+        print("Min, max, mean img value (post) = {}, {}, {}".format(
+            np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+            np.mean(np.abs(dPar.img))))
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
 def getFACalphas(CL=None, P2U=None, UD=None):
