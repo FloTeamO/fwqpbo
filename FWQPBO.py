@@ -191,8 +191,12 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
             imVol[z] = im
             frames.append(iFrame)
         else:
-            ds.PixelData = im
-            ds.save_as(filename)
+            try:
+                ds.PixelData = im
+                ds.save_as(filename)
+            except KeyError:
+                print("KeyError: Error.  saving as numpy array instead")
+                np.save(filename.replace('.dcm', '.npy'), im)
 
     if multiframe:
         setTagValue(ds, 'SOP Instance UID', getSOPInstanceUID())
@@ -200,9 +204,13 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
         ds[tagDict['Frame sequence']].value = \
             [ds[tagDict['Frame sequence']].value[frame] for frame in frames]
         ds.PixelData = imVol
-        filename = outDir+r'/0.dcm'
-        ds.save_as(filename)
-
+        try:
+            filename = os.path.join(outDir, '0.dcm')
+            print("filename = {}".format(filename))
+            ds.save_as(filename)
+        except PermissionError:
+            print("Permission Error.  saving as numpy array instead")
+            np.save(filename.replace('.dcm', '.npy'), imVol)
 
 # Check if ds is a multiframe DICOM object
 def isMultiFrame(ds):
@@ -393,7 +401,7 @@ def getType(frameList, printType=False):
 
 
 # update dPar with info retrieved from the DICOM files including image data
-def updateDataParamsDICOM(dPar, files):
+def updateDataParamsDICOM(dPar, files, verbose=False):
     frameList = []
     for file in files:
         ds = dicom.read_file(file, stop_before_pixels=True)
@@ -580,28 +588,55 @@ def updateDataParamsDICOM(dPar, files):
                 raise Exception('Unknown image types')
             img.append(c)
     dPar.frameList = frameList
+	if verbose:
+	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
+	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = np.array(img)*dPar.reScale
+	if verbose:
+	    print("Min, max, mean img value (post) = {}, {}, {}".format(
+	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+	        np.mean(np.abs(dPar.img))))
 
+
+def updateDataParamsNPZ(dPar, file, verbose=False):
+	updateDataParamsNonDicom(dPar, file, npz=True, verbose=verbose)
+
+def updateDataParamsNPZ(dPar, file, verbose=False):
+	updateDataParamsNonDicom(dPar, file, npz=False, verbose=verbose)
 
 # update dPar with information retrieved from MATLAB file arranged
 # according to ISMRM fat-water toolbox
-def updateDataParamsMATLAB(dPar, file):
-    try:
-        mat = scipy.io.loadmat(file)
-    except:
-        raise Exception('Could not read MATLAB file {}'.format(file))
-    data = mat['imDataParams'][0, 0]
+def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
+    if npz:
+        data = np.load(file)
+        img = data['img']  # shape (nx, ny, ny, ncoils, nechoes)
+        echoTimes = data['echoTimes']  # in seconds
+        clockwise = bool(data['clockwise'])  # boolean
+        dPar.B0 = float(data['B0'])  # float
+        try:
+            dx = float(data['dx'])  # in mm
+            dy = float(data['dy'])  # in mm
+            dz = float(data['dz'])  # in mm
+        except KeyError:
+            # assume voxel size if not provided
+            dx = dy = 1.5
+            dz = 5
+        # mask = data['mask']
+    else:
+        try:
+            mat = scipy.io.loadmat(file)
+        except:
+            raise Exception('Could not read MATLAB file {}'.format(file))
+        data = mat['imDataParams'][0, 0]
 
-    for i in range(0, 4):
-        if len(data[i].shape) == 5:
-            img = data[i]  # Image data (row,col,slice,coil,echo)
-        elif data[i].shape[1] > 2:
-            echoTimes = data[i][0]  # TEs [sec]
-        else:
-            if data[i][0, 0] > 1:
-                dPar.B0 = data[i][0, 0]  # Fieldstrength [T]
-            else:
-                clockwise = data[i][0, 0]  # Clockwiseprecession?
+        img = data['images']
+        echoTimes = data['TE'][0]
+        clockwise = bool(data['PrecessionIsClockwise'][0, 0])
+        dPar.B0 = data['FieldStrength'][0, 0]
+        dx, dy, dz = 1.5, 1.5, 5  # Ad hoc assumption on voxelsize
+
+    # if 'mask' in data.dtype.fields:
+    #     mask = data['mask']
 
     if not clockwise:
         raise Exception('Warning: Not clockwise precession. ' +
@@ -643,7 +678,7 @@ def updateDataParamsMATLAB(dPar, file):
 
     dPar.frameList = []
 
-    dPar.dx, dPar.dy, dPar.dz = 1.5, 1.5, 5  # Ad hoc assumption on voxelsize
+    dPar.dx, dPar.dy, dPar.dz = dx, dy, dz
 
     # To get data as: (echo,slice,row,col)
     img.shape = (dPar.ny, dPar.nx, dPar.nz, dPar.N)
@@ -651,8 +686,14 @@ def updateDataParamsMATLAB(dPar, file):
     img = np.swapaxes(img, 2, 3)
 
     img = img.flatten()
+	if verbose:
+	    print("Min, max, mean img value (pre) = {}, {}, {}".format(
+	        np.min(np.abs(img)), np.max(np.abs(img)), np.mean(np.abs(img))))
     dPar.img = img*dPar.reScale
-
+	if verbose:
+	    print("Min, max, mean img value (post) = {}, {}, {}".format(
+	        np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
+	        np.mean(np.abs(dPar.img))))
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
 def getFACalphas(CL=None, P2U=None, UD=None):
@@ -880,6 +921,8 @@ def updateDataParams(dPar, outDir=None):
         if not validFiles:
             if len(dPar.files) == 1 and dPar.files[0][-4:] == '.mat':
                 updateDataParamsMATLAB(dPar, dPar.files[0])
+            elif len(dPar.files) == 1 and dPar.files[0][-4:] == '.npz':
+                updateDataParamsNPZ(dPar, dPar.files[0])
             else:
                 raise Exception('No valid files found')
     elif 'dirs' in dPar:
