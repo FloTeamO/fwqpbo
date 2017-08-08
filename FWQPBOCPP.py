@@ -2,6 +2,7 @@ import ctypes
 import numpy as np
 import sys
 import os
+import platform
 
 IMGTYPE = ctypes.c_float
 
@@ -9,16 +10,26 @@ IMGTYPE = ctypes.c_float
 
 
 def init_FWcpp():
-    DLLdir = os.path.join(os.path.dirname(__file__), r'cpp/bin/Release')
-    if '32 bit' in sys.version:
-        DLLfile = 'FW32'
+    libdir = os.path.join(os.path.dirname(__file__), 'cpp', 'bin', 'Release')
+    if platform.system() == 'Windows':
+        if '32 bit' in sys.version:
+            libfile = 'FW32'
+        else:
+            libfile = 'FW64'
+        try:
+            FWDLL = np.ctypeslib.load_library(libfile, libdir)
+        except:
+            print(sys.exc_info())
+            raise Exception(
+                '{}.dll not found in dir "{}"'.format(libfile, libdir))
     else:
-        DLLfile = 'FW64'
-    try:
-        FWDLL = np.ctypeslib.load_library(DLLfile, DLLdir)
-    except:
-        print(sys.exc_info())
-        raise Exception('{}.dll not found in dir "{}"'.format(DLLfile, DLLdir))
+        libfile = 'libFW'
+        try:
+            FWDLL = np.ctypeslib.load_library(libfile, libdir)
+        except:
+            print(sys.exc_info())
+            raise Exception(
+                '{}.so not found in dir "{}"'.format(libfile, libdir))
 
     FWcpp = FWDLL.fwqpbo  # Get exported function from DLL
     FWcpp.restype = None  # Needed for void functions
@@ -78,7 +89,7 @@ def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
     FWcpp(Yreal, Yimag, dPar.N, dPar.nx, dPar.ny, dPar.nz, dPar.dx, dPar.dy,
           dPar.dz, dPar.t1, dPar.dt, dPar.B0, mPar.CS, mPar.alpha.flatten(),
           mPar.M, mPar.P, aPar.realEstimates, aPar.R2step, aPar.nR2,
-          aPar.iR2cand, aPar.nR2cand, aPar.FibSearch, aPar.mu, aPar.nB0,
+          np.asarray(aPar.iR2cand, dtype=np.int32), aPar.nR2cand, aPar.FibSearch, aPar.mu, aPar.nB0,
           aPar.nICMiter, aPar.maxICMupdate, aPar.graphcutLevel,
           aPar.multiScale, rhoreal, rhoimag, R2map, B0map)
 
