@@ -1,9 +1,15 @@
 import FWQPBO
 import numpy as np
-import dicom
+try:
+    import dicom
+except ImportError:
+    import pydicom as dicom
 import scipy.io
 import os
 import time
+from os.path import join as pjoin
+
+cwd = os.getcwd()
 
 
 def getScore(case, dir):
@@ -19,7 +25,7 @@ def getScore(case, dir):
             (recFF, dcm.pixel_array.transpose().flatten() * reScaleSlope))
     recFF.shape = recFF.shape + (1,)
     # Read reference MATLAB-file
-    refFile = r'.\challenge\refdata.mat'
+    refFile = pjoin(cwd, 'challenge', 'refdata.mat')
     try:
         mat = scipy.io.loadmat(refFile)
     except:
@@ -31,17 +37,18 @@ def getScore(case, dir):
         (1 - np.sum((np.abs(refFF - recFF) > 0.1) * mask) / np.sum(mask))
     return score
 
-if not os.path.isfile(r'.\challenge\refdata.mat'):
+if not os.path.isfile(pjoin(cwd, 'challenge', 'refdata.mat')):
     url = r'"https://dl.dropboxusercontent.com/u/5131732/' + \
         r'ISMRM_Challenge/refdata.mat"'
     raise Exception(r'Please download ISMRM 2012 challenge reference data '
                     'from {} and put in "challenge" subdirectory'.format(url))
 
-modelParamsFile = r'.\modelParams.txt'
+modelParamsFile = pjoin(cwd, 'modelParams.txt')
 cases = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
 
-for case in cases:
-    if not os.path.isfile(r'.\challenge\{}.mat'.format(str(case).zfill(2))):
+for case in cases[1:2]:
+    if not os.path.isfile(pjoin(
+            cwd, 'challenge', '{}.mat'.format(str(case).zfill(2)))):
         url = r'"http://dl.dropbox.com/u/5131732/' + \
             r'ISMRM_Challenge/data_matlab.zip"'
         raise Exception(
@@ -50,15 +57,22 @@ for case in cases:
 
 results = []
 for case in cases:
-    dataParamsFile = r'.\challenge\{}.txt'.format(case)
+    dataParamsFile = pjoin(cwd, 'challenge', '{}.txt'.format(case))
     if case == 9:
-        algoParamsFile = r'.\algoParams2D.txt'
+        algoParamsFile = pjoin(cwd, 'algoParams2D.txt')
     else:
-        algoParamsFile = r'.\algoParams3D.txt'
-    outDir = r'.\challenge\{}_REC'.format(str(case).zfill(2))
+        algoParamsFile = pjoin(cwd, 'algoParams3D.txt')
+    if not os.path.isfile(dataParamsFile):
+        raise ValueError(
+            "dataParamsFile not found at: {}".format(dataParamsFile))
+    if not os.path.isfile(algoParamsFile):
+        raise ValueError(
+            "algoParamsFile not found at: {}".format(algoParamsFile))
+    outDir = pjoin(cwd, 'challenge', '{}_REC'.format(str(case).zfill(2)))
     t = time.time()
     FWQPBO.FW(dataParamsFile, algoParamsFile, modelParamsFile, outDir)
-    results.append((case, getScore(case, outDir + '/FF'), time.time() - t))
+    results.append((case,
+                    getScore(case, pjoin(outDir, 'ff')), time.time() - t))
 
 print()
 for case, score, recTime in results:
