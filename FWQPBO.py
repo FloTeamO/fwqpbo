@@ -473,7 +473,7 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                         frameList[magnFrame][1]][y1:y2, x1:x2].flatten()
                     phase = dcm.pixel_array[
                         frameList[phaseFrame][1]][y1:y2, x1:x2].flatten()
-                    if dcm.Manufacturer.startswith('Philips'):
+                    if dcm.Manufacturer.upper().startswith('PHILIPS'):
                         magn_slope = \
                             getAttribute(dcm, 'Rescale Slope',
                                          frameList[magnFrame][1])
@@ -503,7 +503,7 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                                     phase_rescale))
                         c = c * np.exp(1j*pscale * (
                             phase * phase_slope + phase_intercept))
-                    elif dcm.Manufacturer.startswith('Siemens'):
+                    elif dcm.Manufacturer.upper().startswith('SIEMENS'):
                         # Abs val needed for Siemens data to get correct phase sign
                         reScaleIntercept = \
                             np.abs(getAttribute(dcm, 'Rescale Intercept',
@@ -519,7 +519,7 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                     pDcm = dicom.read_file(phaseFile)
                     magn = mDcm.pixel_array[y1:y2, x1:x2].flatten()
                     phase = pDcm.pixel_array[y1:y2, x1:x2].flatten()
-                    if mDcm.Manufacturer.startswith('Philips'):
+                    if mDcm.Manufacturer.upper().startswith('PHILIPS'):
                         magn_slope = mDcm.RescaleSlope
                         phase_slope = pDcm.RescaleSlope
                         magn_intercept = mDcm.RescaleIntercept
@@ -538,7 +538,7 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                                           "Assuming 'mrad'")
                         c = c * np.exp(1j*pscale * (
                             phase * phase_slope + phase_intercept))
-                    elif mDcm.Manufacturer.startswith('Siemens'):
+                    elif mDcm.Manufacturer.upper().startswith('SIEMENS'):
                         # Abs val needed for Siemens data to get correct phase sign
                         reScaleIntercept = np.abs(
                             getAttribute(pDcm, 'Rescale Intercept'))
@@ -546,7 +546,7 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                     else:
                         raise NotImplementedError(
                             "Unimplemented for manufacturer: {}".format(
-                                dcm.Manufacturer))
+                                mDcm.Manufacturer))
                 # For some reason, intercept is used as slope (Siemens only?)
 
 
