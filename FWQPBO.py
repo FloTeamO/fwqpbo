@@ -1,6 +1,10 @@
+import warnings
 import numpy as np
 import os
-import dicom
+try:
+    import dicom
+except ImportError:
+    import pydicom as dicom
 import datetime
 import sys
 import configparser
@@ -50,13 +54,15 @@ tagDict = {
 def getSOPInstanceUID():
     t = datetime.datetime.now()
     datestr = '{:04d}{:02d}{:02d}{:02d}{:02d}{:02d}{:03d}'.format(
-     t.year, t.month, t.day, t.hour, t.minute, t.second, t.microsecond//1000)
+        t.year, t.month, t.day, t.hour, t.minute, t.second,
+        t.microsecond//1000)
     randstr = str(np.random.randint(1000, 1000000000))
     uidstr = "1.3.12.2.1107.5.2.32.35356." + datestr + randstr
     return uidstr
 
 
-def getSeriesInstanceUID(): return getSOPInstanceUID() + ".0.0.0"
+def getSeriesInstanceUID():
+    return getSOPInstanceUID() + ".0.0.0"
 
 
 # Set window so that 95% of pixels are inside
@@ -130,7 +136,7 @@ def save(outDir, image, dPar, seriesDescription, seriesNumber,
         im = im.astype('uint16')
         # Set window so that 95% of pixels are inside
         windowCenter, windowWidth = get95percentileWindow(
-                                            im, reScaleIntercept, reScaleSlope)
+            im, reScaleIntercept, reScaleSlope)
         if dPar.frameList:
             # Get frame
             frame = dPar.frameList[dPar.totalN*slice*len(imType)]
@@ -274,8 +280,8 @@ def AttrInDataset(ds, attr, multiframe):
 
 # List of DICOM attributes required for the water-fat separation
 reqAttributes = ['Image Type', 'Echo Time', 'Slice Location',
-                               'Imaging Frequency', 'Columns', 'Rows',
-                               'Pixel Spacing', 'Spacing Between Slices']
+                 'Imaging Frequency', 'Columns', 'Rows',
+                 'Pixel Spacing', 'Spacing Between Slices']
 
 
 # Checks if list of DICOM files contains required information
@@ -401,7 +407,7 @@ def updateDataParamsDICOM(dPar, files):
     frameList.sort(key=lambda tags: tags[3])  # Second, sort on echo time
     frameList.sort(key=lambda tags: tags[4])  # Third, sort on slice location
 
-    type = getType(frameList, True)
+    dcm_types = getType(frameList, True)
     dPar.dx = float(frameList[0][8][1])
     dPar.dy = float(frameList[0][8][0])
     dPar.dz = float(frameList[0][9])
@@ -445,8 +451,8 @@ def updateDataParamsDICOM(dPar, files):
         dcm = dicom.read_file(file)
     for n in dPar.echoes:
         for slice in dPar.sliceList:
-            i = (dPar.N*slice+n)*len(type)
-            if type == 'MP':  # Magnitude/phase images
+            i = (dPar.N*slice+n)*len(dcm_types)
+            if dcm_types == 'MP':  # Magnitude/phase images
                 magnFrame = i
                 phaseFrame = i+1
                 if multiframe:
@@ -471,10 +477,10 @@ def updateDataParamsDICOM(dPar, files):
                 # For some reason, intercept is used as slope (Siemens only?)
                 c = magn*np.exp(phase/float(reScaleIntercept)*2*np.pi*1j)
             # Real/imaginary images and Magnitude/real/imaginary images
-            elif type == 'RI' or type == 'MRI':
-                if type == 'RI':
+            elif dcm_types == 'RI' or dcm_types == 'MRI':
+                if dcm_types == 'RI':
                     realFrame = i+1
-                elif type == 'MRI':
+                elif dcm_types == 'MRI':
                     realFrame = i+2
                 imagFrame = i
                 if multiframe:
@@ -529,7 +535,7 @@ def updateDataParamsMATLAB(dPar, file):
             else:
                 clockwise = data[i][0, 0]  # Clockwiseprecession?
 
-    if clockwise != 1:
+    if not clockwise:
         raise Exception('Warning: Not clockwise precession. ' +
                         'Need to write code to handle this case!')
 
@@ -564,7 +570,7 @@ def updateDataParamsMATLAB(dPar, file):
     dPar.t1 = echoTimes[0]
     dPar.dt = np.mean(np.diff(echoTimes))
     if np.max(np.diff(echoTimes))/dPar.dt > 1.05 or np.min(
-      np.diff(echoTimes))/dPar.dt < .95:
+            np.diff(echoTimes))/dPar.dt < .95:
         raise Exception('Warning: echo inter-spacing varies more than 5%')
 
     dPar.frameList = []
@@ -799,7 +805,9 @@ def updateDataParams(dPar, outDir=None):
     else:
         dPar.offresCenter = 0.
     if 'files' in dPar:
+        dPar.files = dPar.files.replace('\\', os.path.sep)
         dPar.files = dPar.files.split(',')
+
         validFiles = getValidFiles(dPar['files'])
         if not validFiles:
             if len(dPar.files) == 1 and dPar.files[0][-4:] == '.mat':
@@ -853,6 +861,7 @@ def getSlabs(sliceList, reconSlab):
             slices.append(slice)
     slabs.append((slices, pos))
     return slabs
+
 
 # Get total fat component (for Fatty Acid Composition; trivial otherwise)
 def getFat(rho, nVxl, alpha):
@@ -1019,11 +1028,11 @@ def FW(dataParamFile, algoParamFile, modelParamFile, outDir=None):
 def main():
     # Initiate command line parser
     p = optparse.OptionParser()
-    p.add_option('--dataParamFile', '-d', default='',  type="string",
+    p.add_option('--dataParamFile', '-d', default='', type="string",
                  help="Name of data parameter configuration text file")
-    p.add_option('--algoParamFile', '-a', default='',  type="string",
+    p.add_option('--algoParamFile', '-a', default='', type="string",
                  help="Name of algorithm parameter configuration text file")
-    p.add_option('--modelParamFile', '-m', default='',  type="string",
+    p.add_option('--modelParamFile', '-m', default='', type="string",
                  help="Name of model parameter configuration text file")
 
     # Parse command line
