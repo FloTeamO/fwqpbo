@@ -108,9 +108,11 @@ def setTagValue(ds, key, val, frame=None, VR=None):
 def save(outDir, image, dPar, seriesDescription, seriesNumber,
          reScaleIntercept=0., reScaleSlope=1.):
     print(r'Writing image{} to "{}"'.format('s'*(dPar.nz > 1), outDir))
-    image.shape = (dPar.nz, dPar.ny, dPar.nx)
     if not os.path.isdir(outDir):
         os.mkdir(outDir)
+    np.save(os.path.join(outDir, 's'*(dPar.nz > 1) + '.npy'), image)
+
+    image.shape = (dPar.nz, dPar.ny, dPar.nx)
     seriesInstanceUID = getSeriesInstanceUID()
     # Single file is interpreted as multi-frame
     multiframe = dPar.frameList and \
@@ -565,9 +567,9 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                     imagPart = dcm.pixel_array[
                         frameList[imagFrame][1]][y1:y2, x1:x2].flatten()
                     # Assumes real and imaginary slope/intercept are equal
-                    reScaleIntercept = getAttribute(
+                    re_intercept = getAttribute(
                         dcm, 'Rescale Intercept', frameList[realFrame][1])
-                    reScaleSlope = getAttribute(
+                    re_slope = getAttribute(
                         dcm, 'Rescale Slope', frameList[realFrame][1])
                 else:
                     realFile = frameList[realFrame][0]
@@ -576,11 +578,34 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                     iDcm = dicom.read_file(imagFile)
                     realPart = rDcm.pixel_array[y1:y2, x1:x2].flatten()
                     imagPart = iDcm.pixel_array[y1:y2, x1:x2].flatten()
-                    # Assumes real and imaginary slope/intercept are equal
-                    reScaleIntercept = getAttribute(rDcm, 'Rescale Intercept')
-                    reScaleSlope = getAttribute(rDcm, 'Rescale Slope')
-                if reScaleIntercept and reScaleSlope:
-                    offset = reScaleIntercept/reScaleSlope
+                    try:
+                        print("SCALING VALS")
+                        scaling_elem = iDcm[0x0040, 0x9096][0]
+                        im_intercept = scaling_elem[0x0040, 0x9224].value
+                        im_slope = scaling_elem[0x0040, 0x9225].value
+                        scaling_elem = rDcm[0x0040, 0x9096][0]
+                        re_intercept = scaling_elem[0x0040, 0x9224].value
+                        re_slope = scaling_elem[0x0040, 0x9225].value
+                        print(re_slope, re_intercept, im_slope, im_intercept)
+                    except KeyError:
+                        #raise(e)
+                        try:
+                            im_intercept = getAttribute(iDcm,
+                                                        'Rescale Intercept')
+                            im_slope = getAttribute(iDcm, 'Rescale Slope')
+                            re_intercept = getAttribute(rDcm,
+                                                        'Rescale Intercept')
+                            re_slope = getAttribute(rDcm, 'Rescale Slope')
+                        except KeyError:
+                            warnings.warn(
+                                "Rescale Slope and/or Intercept not found.")
+                if False:
+                    if re_intercept and re_slope:
+                        im_offset = im_intercept/im_slope
+                        re_offset = re_intercept/re_slope
+                    else:
+                        im_offset = re_offset = 0.
+                    c = (realPart+re_offset)+1.0*1j*(imagPart+im_offset)
                 else:
                     offset = 0.
                 c = (realPart+offset)+1.0*1j*(imagPart+offset)
@@ -1061,6 +1086,7 @@ def reconstructAndSave(dPar, aPar, mPar):
 
     if not os.path.isdir(dPar.outDir):
         os.mkdir(dPar.outDir)
+    np.save(os.path.join(dPar.outDir, 'img.npy'), dPar.img)
     if (bphi):
         save(dPar.outDir+r'/phi', np.angle(wat, deg=True)+180, dPar,
              'phi', 100)
