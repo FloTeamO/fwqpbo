@@ -607,8 +607,8 @@ def updateDataParamsDICOM(dPar, files, verbose=False):
                         im_offset = re_offset = 0.
                     c = (realPart+re_offset)+1.0*1j*(imagPart+im_offset)
                 else:
-                    offset = 0.
-                c = (realPart+offset)+1.0*1j*(imagPart+offset)
+                    c = realPart * re_slope + re_intercept
+                    c = c + 1j * (imagPart * im_slope + im_intercept)
             else:
                 raise Exception('Unknown image types')
             img.append(c)
