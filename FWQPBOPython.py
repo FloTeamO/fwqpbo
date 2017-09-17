@@ -2,6 +2,7 @@ import ctypes
 import numpy as np
 import sys
 import os
+import platform
 from skimage.filters import threshold_otsu
 
 IMGTYPE = ctypes.c_float
@@ -10,16 +11,26 @@ gyro = 42.576
 
 # Configure the QPBO graphcut function from the c++ DLL
 def init_QPBOcpp():
-    DLLdir = os.path.join(os.path.dirname(__file__), r'cpp/bin/Release')
-    if '32 bit' in sys.version:
-        DLLfile = 'FW32'
+    libdir = os.path.join(os.path.dirname(__file__), r'cpp/bin/Release')
+    if platform.system() == 'Windows':
+        if '32 bit' in sys.version:
+            DLLfile = 'FW32'
+        else:
+            DLLfile = 'FW64'
+        try:
+            FWDLL = np.ctypeslib.load_library(DLLfile, libdir)
+        except:
+            print(sys.exc_info())
+            raise Exception('{}.dll not found in dir "{}"'.format(
+                DLLfile, libdir))
     else:
-        DLLfile = 'FW64'
-    try:
-        FWDLL = np.ctypeslib.load_library(DLLfile, DLLdir)
-    except:
-        print(sys.exc_info())
-        raise Exception('{}.dll not found in dir "{}"'.format(DLLfile, DLLdir))
+        libfile = 'libFW'
+        try:
+            FWDLL = np.ctypeslib.load_library(libfile, libdir)
+        except:
+            print(sys.exc_info())
+            raise Exception(
+                '{} not found in dir "{}"'.format(libfile, libdir))
     QPBOcpp = FWDLL.gc  # Get exported function from DLL
     QPBOcpp .restype = None  # Needed for void functions
 
@@ -268,7 +279,7 @@ def calculateFieldMap(nB0, level, graphcutLevel, multiScale, maxICMupdate,
             OP[b, :] = (1-np.cos(2*np.pi*(b-offresCenter)/nB0))/2*offresPenalty
 
     D = np.array([J[A, range(J.shape[1])] + OP[A, range(OP.shape[1])],
-                 J[B, range(J.shape[1])] + OP[B, range(OP.shape[1])]],
+                  J[B, range(J.shape[1])] + OP[B, range(OP.shape[1])]],
                  dtype=IMGTYPE)
     print('DONE')
 
@@ -445,6 +456,7 @@ def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
                  'sx': 1, 'sy': 1, 'sz': 1,
                  'dx': dPar.dx, 'dy': dPar.dy, 'dz': dPar.dz}
         J = getB0Residuals(Y, C, aPar.nB0, nVxl, aPar.iR2cand, D)
+        np.savez(os.path.join(dPar.outDir, 'recon_B0stage.npz'), J=J, C=C, D=D)
         offresPenalty = aPar.offresPenalty
         if aPar.offresPenalty > 0:
             offresPenalty *= getMeanEnergy(Y)
@@ -460,6 +472,8 @@ def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
 
     if determineR2:
         J = getR2Residuals(Y, dB0, C, aPar.nB0, nR2, nVxl, D)
+        np.savez(os.path.join(dPar.outDir, 'recon_R2stage.npz'), J=J, dB0=dB0,
+                 D=D)
         R2 = greedyR2(J, nVxl)
 
     # Find least squares solution given dB0 and R2

@@ -631,6 +631,7 @@ def updateDataParamsMATLAB(dPar, file, verbose=False):
     updateDataParamsNonDicom(dPar, file, npz=False, verbose=verbose)
 
 
+
 # update dPar with information retrieved from MATLAB file arranged
 # according to ISMRM fat-water toolbox
 def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
@@ -721,6 +722,7 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
         print("Min, max, mean img value (post) = {}, {}, {}".format(
             np.min(np.abs(dPar.img)), np.max(np.abs(dPar.img)),
             np.mean(np.abs(dPar.img))))
+
 
 # Get relative weights alpha of fat resonances based on CL, UD, and PUD per UD
 def getFACalphas(CL=None, P2U=None, UD=None):
@@ -1124,6 +1126,19 @@ def readConfig(file, section):
     return AttrDict(config[section])
 
 
+def dPar_to_npz(dPar, npz_filename):
+    img = dPar.img.reshape((dPar.N, dPar.nz, dPar.ny, dPar.nx))
+    img = np.swapaxes(img, 2, 3)
+    img = np.transpose(img)
+    img = img[..., np.newaxis, :]  # add coils
+    dPar.ny, dPar.nx, dPar.nz, nCoils, dPar.N = img.shape
+    echoTimes = [dPar.t1, ]
+    for n in range(1, dPar.N):
+        echoTimes.append(echoTimes[n-1] + dPar.dt)
+    np.savez(npz_filename, img=img, echoTimes=echoTimes, B0=dPar.B0,
+             clockwise=False,  dx=dPar.dx, dy=dPar.dy, dz=dPar.dz)
+    return
+
 # Wrapper function
 def FW(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     # Read configuration files
@@ -1143,6 +1158,10 @@ def FW(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     print('nx,ny,nz = {},{},{}'.format(dPar.nx, dPar.ny, dPar.nz))
     print('dx,dy,dz = {},{},{}'.format(
         round(dPar.dx, 2), round(dPar.dy, 2), round(dPar.dz, 2)))
+
+    if not os.path.exists(dPar.outDir):
+        os.makedirs(dPar.outDir)
+    dPar_to_npz(dPar=dPar, npz_filename=os.path.join(dPar.outDir, 'data.npz'))
 
     # Run fat/water processing
     if algoParams.use3D or len(dPar.sliceList) == 1:
