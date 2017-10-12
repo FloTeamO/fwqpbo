@@ -638,8 +638,14 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
     if npz:
         data = np.load(file)
         img = data['img']  # shape (nx, ny, ny, ncoils, nechoes)
-        echoTimes = data['echoTimes']  # in seconds
-        clockwise = bool(data['clockwise'])  # boolean
+        echoTimes = np.asarray(data['echoTimes'])  # in seconds
+        if np.any(echoTimes) > 1:
+            echoTimes = echoTimes / 1000
+            warnings.warn(
+                "Echo times should be in seconds.  Found values greater than "
+                "1 so assuming ms where used instead.  dividing by 1000 now "
+                "to convert to seconds.")
+        clockwise = True  # bool(data['clockwise'])  # boolean
         dPar.B0 = float(data['B0'])  # float
         try:
             dx = float(data['dx'])  # in mm
@@ -650,6 +656,8 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
             dx = dy = 1.5
             dz = 5
         # mask = data['mask']
+        if 'B0map' in data:
+            dPar.B0map = data['B0map']
     else:
         try:
             mat = scipy.io.loadmat(file)
@@ -663,6 +671,7 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
         dPar.B0 = data['FieldStrength'][0, 0]
         dx, dy, dz = 1.5, 1.5, 5  # Ad hoc assumption on voxelsize
 
+        dPar.B0map=None
     # if 'mask' in data.dtype.fields:
     #     mask = data['mask']
 
@@ -709,9 +718,13 @@ def updateDataParamsNonDicom(dPar, file, npz=False, verbose=False):
     dPar.dx, dPar.dy, dPar.dz = dx, dy, dz
 
     # To get data as: (echo,slice,row,col)
+    print("img.shape (pre) = {}".format(img.shape))
     img.shape = (dPar.ny, dPar.nx, dPar.nz, dPar.N)
+    print("img.shape (post1) = {}".format(img.shape))
     img = np.transpose(img)
+    print("img.shape (post2) = {}".format(img.shape))
     img = np.swapaxes(img, 2, 3)
+    print("img.shape (post3) = {}".format(img.shape))
 
     img = img.flatten()
     if verbose:
@@ -942,6 +955,18 @@ def updateDataParams(dPar, outDir=None):
         dPar.offresCenter = float(dPar.offrescenter)
     else:
         dPar.offresCenter = 0.
+    if 'output_npz_only' in dPar:
+        dPar.output_npz_only = bool(int(dPar.output_npz_only))
+    else:
+        dPar.output_npz_only = False
+    print("dPar.b0map_file = {}".format(dPar.b0map_file))
+    if 'b0map_file' in dPar:
+        #B0map_file = pjoin('/Users/lee8rx/Dropbox/ForAkila/OCT09/RESULTS_NPZ_bipolar_even_combined_3to6', 'B0map', 's.npy')
+        b0map_file = dPar.b0map_file.replace('\\', os.path.sep)
+        dPar.B0map = np.load(b0map_file)/1000  # TODO: don't use hardcoded scaling?
+    else:
+        dPar.B0map = None
+
     if 'files' in dPar:
         dPar.files = dPar.files.replace('\\', os.path.sep)
         dPar.files = dPar.files.split(',')
@@ -1017,6 +1042,8 @@ def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
     else:
         method = 'FWQPBOCPP'
     m = __import__(method)
+    if B0map is None:
+        B0map = dPar.B0map
     return m.reconstruct(dPar, aPar, mPar, B0map, R2map)
 
 
@@ -1027,6 +1054,7 @@ def reconstructAndSave(dPar, aPar, mPar):
         mPar.CS[0] = 1.3+3.748-.01085*dPar.Temp
 
     nVxl = dPar.nx*dPar.ny*dPar.nz
+    print("nVxl = {}".format(nVxl))
 
     if mPar.nFAC > 0:  # For Fatty Acid Composition
         # First pass: use standard fat-water separation to determine B0 and R2*
@@ -1035,7 +1063,7 @@ def reconstructAndSave(dPar, aPar, mPar):
         mPar1.alpha = getFACalphas(mPar.CL, mPar.P2U, mPar.UD)
         mPar1.M = mPar1.alpha.shape[0]
         mPar = mPar1
-    rho, B0map, R2map = reconstruct(dPar, aPar, mPar)
+    rho, B0map, R2map = reconstruct(dPar, aPar, mPar, B0map=dPar.B0map)
     eps = sys.float_info.epsilon
 
     wat = rho[0]
@@ -1123,6 +1151,7 @@ def reconstructAndSave(dPar, aPar, mPar):
 def readConfig(file, section):
     config = configparser.ConfigParser()
     config.read(file)
+    print(config['DEFAULT'])
     return AttrDict(config[section])
 
 
@@ -1162,6 +1191,8 @@ def FW(dataParamFile, algoParamFile, modelParamFile, outDir=None):
     if not os.path.exists(dPar.outDir):
         os.makedirs(dPar.outDir)
     dPar_to_npz(dPar=dPar, npz_filename=os.path.join(dPar.outDir, 'data.npz'))
+    if dPar.output_npz_only:
+        return
 
     # Run fat/water processing
     if algoParams.use3D or len(dPar.sliceList) == 1:

@@ -402,7 +402,9 @@ def getMeanEnergy(Y):
 
 # Perform the actual reconstruction
 def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
+
     determineB0 = aPar.graphcutLevel < 20 or aPar.nICMiter > 0
+    print("determineB0={}".format(determineB0))
     nR2 = aPar.nR2
     determineR2 = nR2 > 1
     if (nR2 < 0):
@@ -466,8 +468,10 @@ def reconstruct(dPar, aPar, mPar, B0map=None, R2map=None):
                                 aPar.nICMiter, J, V, aPar.mu,
                                 offresPenalty, int(dPar.offresCenter/B0step))
     elif B0map is None:
+        print("B0map is NONE!!!!!!!")
         dB0 = np.zeros(nVxl, dtype=int)
     else:
+        print("B0map range = [{}, {}]".format(B0map.min(), B0map.max()))
         dB0 = np.array(B0map/B0step, dtype=int)
 
     if determineR2:
