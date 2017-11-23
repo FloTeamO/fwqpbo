@@ -62,3 +62,6 @@ cpp/qpbo32.layout
 cpp/qpbo64.cbp
 cpp/qpbo64.layout
 
+cpp/bin
+cpp/build
+FWQPBO.pyc
